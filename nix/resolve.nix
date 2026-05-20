@@ -49,8 +49,18 @@ let
       key = dedupKeyOf provided;
       alreadySeen = key != null && search.has key state;
       state' = if key != null then search.insert key provided state else state;
+      rawClass = provided.${class} or { };
+      # deferredModule.merge produces { imports = [...]; } with only imports.
+      # Aspect values always have structural keys (name, includes, etc.), so
+      # a value with only imports is unambiguously from deferredModule dispatch.
+      isDeferredClass =
+        builtins.isAttrs rawClass
+        && rawClass ? imports
+        && builtins.attrNames rawClass == [ "imports" ];
+      classContent =
+        if isDeferredClass then rawClass.imports else extractClass rawClass;
       state'' =
-        if !alreadySeen then search.emit (extractClass (provided.${class} or { })) state' else state';
+        if !alreadySeen then search.emit classContent state' else state';
       childChain = aspect-chain ++ [ provided ];
     in
     search.foldl (

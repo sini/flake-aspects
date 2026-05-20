@@ -103,12 +103,34 @@ let
   # Recursion-safe binding: either doesn't force subtypes during construction.
   aspectOrFn = cnf: lib.types.either (aspectType cnf) (aspectSubmodule cnf);
 
+  # Dispatching freeform element type: registered class keys go through
+  # deferredModule (clean content, no structural keys injected), everything
+  # else goes through aspectType (full aspect treatment with identity).
+  aspectFreeformElemType =
+    cnf:
+    let
+      classKeys = cnf.classes or { };
+    in
+    lib.types.mkOptionType {
+      name = "aspectFreeformElem";
+      check = _: true;
+      merge =
+        loc: defs:
+        let
+          key = lib.last loc;
+        in
+        if classKeys ? ${key} then
+          lib.types.deferredModule.merge loc defs
+        else
+          (aspectType cnf).merge loc defs;
+    };
+
   aspectSubmodule =
     cnf:
     lib.types.submodule (
       { name, config, ... }:
       {
-        freeformType = lib.types.lazyAttrsOf (aspectType cnf);
+        freeformType = lib.types.lazyAttrsOf (aspectFreeformElemType cnf);
         config._module.args.aspect = config;
         imports = [ (lib.mkAliasOptionModule [ "_" ] [ "provides" ]) ];
 
