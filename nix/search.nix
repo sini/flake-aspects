@@ -1,5 +1,5 @@
 # nix/search.nix — Palmer §3 Search monad. Zero dependencies.
-rec {
+let
   empty = {
     index = { };
     results = [ ];
@@ -118,4 +118,17 @@ rec {
         if r.anyFired then iterate r.state else r.state;
     in
     iterate state;
+
+in
+{
+  inherit
+    empty
+    lookup
+    has
+    insert
+    emit
+    foldl
+    on
+    converge
+    ;
 }
