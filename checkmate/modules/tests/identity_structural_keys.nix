@@ -10,9 +10,10 @@
       "provides"
       "__functor"
       "__functionArgs"
-      "__fn"
-      "__args"
-      "__isParametric"
+      "__isWrappedFn"
+      "modules"
+      "resolve"
+      "key"
       "_module"
       "_"
     ];

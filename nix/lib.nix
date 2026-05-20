@@ -24,4 +24,5 @@ in
     resolve
     identity
     ;
+  inherit (types) mkIntensional;
 }

@@ -1,6 +1,7 @@
 lib:
 let
   resolve = import ./resolve.nix lib;
+  identity = import ./identity.nix lib;
 
   ignoredType = lib.types.mkOptionType {
     name = "ignored type";
@@ -50,12 +51,9 @@ let
           d = builtins.head defs;
           v = d.value;
         in
-        # Single def — dispatch by value shape
         if builtins.length defs == 1 then
-          # Wrapped fn passthrough (round-trip)
           if builtins.isAttrs v && (v.__isWrappedFn or false) then
             v
-          # Function: submodule fn → direct eval, parametric → defunctionalize
           else if builtins.isFunction v then
             let
               args = builtins.functionArgs v;
@@ -67,10 +65,8 @@ let
               // {
                 __isWrappedFn = true;
               }
-          # Attrset → aspectSubmodule
           else
             (aspectSubmodule cnf).merge loc defs
-        # Multi-def — coerce functions to { includes = [fn]; }, merge as submodule
         else
           (aspectSubmodule cnf).merge loc (
             map (
@@ -88,9 +84,6 @@ let
           );
     };
 
-  # either(aspectType, aspectSubmodule) — used for includes and provides.
-  # `either` doesn't force subtypes during construction, breaking the
-  # aspectType → aspectSubmodule → includes/provides → aspectType cycle.
   aspectOrFn = cnf: lib.types.either (aspectType cnf) (aspectSubmodule cnf);
 
   aspectSubmodule =
@@ -114,6 +107,9 @@ let
             default = "Aspect ${name}";
             type = lib.types.str;
           };
+
+          # Palmer's `identify` eliminator — intrinsic identity
+          key = mkInternal "aspect identity key" lib.types.str (_: identity.key config);
 
           meta = lib.mkOption {
             description = "Aspect metadata";
@@ -186,11 +182,20 @@ let
       }
     );
 
+  # Palmer's intensional function constructor (§2.2).
+  # Wraps a function as inspectable, comparable first-order data.
+  mkIntensional = name: closure: fn: {
+    inherit name fn closure;
+    key = "${name}:${builtins.hashString "sha256" (builtins.toJSON closure)}";
+    __functor = self: self.fn;
+  };
+
 in
 {
   inherit
     aspectsType
     aspectSubmodule
     aspectType
+    mkIntensional
     ;
 }

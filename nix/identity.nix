@@ -9,18 +9,25 @@ in
 
   key = a: pathKey (aspectPath a);
 
+  # Structural keys — derived from aspectSubmodule's declared options + internal attrs.
+  # If aspectSubmodule gains a new option, add it here.
   structuralKeysSet = lib.genAttrs [
+    # aspectSubmodule declared options
     "name"
     "description"
     "meta"
     "includes"
     "provides"
     "__functor"
-    "__functionArgs"
-    "__fn"
-    "__args"
-    "__isParametric"
+    # computed/internal options
+    "modules"
+    "resolve"
+    "key"
+    # module system internals
     "_module"
     "_"
+    # wrapper tags
+    "__isWrappedFn"
+    "__functionArgs"
   ] (_: true);
 }
