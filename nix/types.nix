@@ -2,6 +2,16 @@ lib:
 let
   resolve = import ./resolve.nix lib;
 
+  isModuleFn =
+    fn:
+    builtins.isFunction fn
+    && (
+      let
+        args = builtins.functionArgs fn;
+      in
+      args ? config || args ? options || args ? lib || args ? pkgs
+    );
+
   ignoredType = lib.types.mkOptionType {
     name = "ignored type";
     description = "ignored values";
@@ -9,7 +19,6 @@ let
     check = _: true;
   };
 
-  # Create internal read-only option with custom apply function
   mkInternal =
     desc: type: fn:
     lib.mkOption {
@@ -41,44 +50,81 @@ let
       };
   };
 
-  isSubmoduleFn =
-    m:
-    let
-      args = lib.functionArgs m;
-    in
-    args ? lib || args ? config || args ? options || args ? aspect;
-
-  # Check if function accepts { class } and/or { aspect-chain }
-  isProviderFn =
-    f:
-    let
-      args = lib.functionArgs f;
-      n = builtins.length (builtins.attrNames args);
-    in
-    (args ? class && n == 1)
-    || (args ? aspect-chain && n == 1)
-    || (args ? class && args ? aspect-chain && n == 2);
-
-  # Direct provider function: ({ class, aspect-chain }) → aspect
-  directProviderFn =
-    cnf: lib.types.addCheck (lib.types.functionTo (aspectSubmodule cnf)) isProviderFn;
-
-  # Curried provider function: (params) → provider (enables parametrization)
-  curriedProviderFn =
+  # Palmer's flat aspect type. ONE type, ONE merge, no recursive type references.
+  # Accepts functions and attrsets. Functions are wrapped as callable attrsets
+  # (defunctionalized). Attrsets merge through aspectSubmodule. No either chains.
+  aspectType =
     cnf:
-    lib.types.addCheck (lib.types.functionTo (providerType cnf)) (
-      f:
-      builtins.isFunction f
-      || lib.isAttrs f && lib.subtractLists [ "__functor" "__functionArgs" ] (lib.attrNames f) == [ ]
-    );
+    lib.types.mkOptionType {
+      name = "aspect";
+      description = "aspect or function";
+      check = v: builtins.isAttrs v || builtins.isFunction v;
+      merge =
+        loc: defs:
+        let
+          # Palmer's defunctionalization with functionTo semantics:
+          # - Tagged (__isWrappedFn) for passthrough recognition
+          # - functionArgs preserved for inspection
+          # - __functor types return value through aspectSubmodule (curried chain support)
+          wrapFn =
+            fn:
+            let
+              ft = (lib.types.functionTo (aspectSubmodule cnf)).merge (loc ++ [ "<function body>" ]) [
+                {
+                  file = "<wrapped>";
+                  value = fn;
+                }
+              ];
+            in
+            ft // { __isWrappedFn = true; };
 
-  # Any provider function: direct or curried
-  providerFn = cnf: lib.types.either (directProviderFn cnf) (curriedProviderFn cnf);
+          isWrapped = d: builtins.isAttrs d.value && (d.value.__isWrappedFn or false);
 
-  # Provider type: function or aspect that can provide configurations
-  providerType = cnf: lib.types.either (providerFn cnf) (aspectSubmodule cnf);
+          # Partition defs
+          fnDefs = builtins.filter (d: builtins.isFunction d.value) defs;
+          wrappedDefs = builtins.filter isWrapped defs;
+          attrDefs = builtins.filter (d: builtins.isAttrs d.value && !(d.value.__isWrappedFn or false)) defs;
+        in
+        if wrappedDefs != [ ] && fnDefs == [ ] && attrDefs == [ ] then
+          # All wrapped fns — pass through the last one
+          (lib.last wrappedDefs).value
+        else if fnDefs == [ ] && wrappedDefs == [ ] then
+          # All attrsets — merge through aspectSubmodule
+          (aspectSubmodule cnf).merge loc defs
+        else if attrDefs == [ ] && wrappedDefs == [ ] && builtins.length fnDefs == 1 then
+          let
+            fn = (builtins.head fnDefs).value;
+            args = builtins.functionArgs fn;
+            isSubmoduleFn = args ? lib || args ? config || args ? options || args ? aspect;
+          in
+          if isSubmoduleFn then
+            # Submodule function (uses _module.args) — let aspectSubmodule evaluate it as a module
+            (aspectSubmodule cnf).merge loc fnDefs
+          else
+            # Pure parametric function — wrap as callable attrset
+            wrapFn fn
+        else
+          # Multiple functions, or mixed fns + attrsets —
+          # coerce functions to { includes = [fn]; }, merge through aspectSubmodule
+          (aspectSubmodule cnf).merge loc (
+            map (
+              d:
+              if builtins.isFunction d.value then
+                d
+                // {
+                  value = {
+                    includes = [ d.value ];
+                  };
+                }
+              else
+                d
+            ) defs
+          );
+    };
 
-  # Core aspect submodule with all aspect properties
+  # Non-recursive aspect submodule. Uses aspectType only via `either`
+  # in provides (safe: either doesn't force merge during construction)
+  # and providerType for includes (safe: mutual lazy recursion in let block).
   aspectSubmodule =
     cnf:
     lib.types.submodule (
@@ -101,19 +147,39 @@ let
             type = lib.types.str;
           };
 
+          meta = lib.mkOption {
+            description = "Aspect metadata";
+            default = { };
+            type = lib.types.submodule {
+              freeformType = lib.types.lazyAttrsOf lib.types.raw;
+              options.aspect-chain = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = cnf.aspectChain or [ ];
+                description = "Chain of ancestor aspect names from root to parent";
+              };
+            };
+          };
+
+          # either: try aspectType first (wraps fns as callable attrsets),
+          # fall back to aspectSubmodule (coerces fns to includes).
+          # This is safe because either doesn't force subtypes during construction.
           includes = lib.mkOption {
-            description = "Providers to ask aspects from";
-            type = lib.types.listOf (providerType cnf);
+            description = "Aspects to include";
+            type = lib.types.listOf (lib.types.either (aspectType cnf) (aspectSubmodule cnf));
             default = [ ];
           };
 
           provides = lib.mkOption {
-            description = "Providers of aspect for other aspects";
+            description = "Named sub-aspects";
             default = { };
             type = lib.types.submodule (
               { config, ... }:
               {
-                freeformType = lib.types.lazyAttrsOf (providerType cnf);
+                freeformType = lib.types.lazyAttrsOf (
+                  lib.types.either (aspectType (cnf // { aspectChain = (cnf.aspectChain or [ ]) ++ [ name ]; })) (
+                    aspectSubmodule (cnf // { aspectChain = (cnf.aspectChain or [ ]) ++ [ name ]; })
+                  )
+                );
                 config._module.args.aspects = config;
               }
             );
@@ -123,7 +189,7 @@ let
             internal = true;
             visible = false;
             description = "Functor to default provider";
-            type = functorType; # (providerType cnf);
+            type = functorType;
             default =
               let
                 defaultFunctor = aspect: { class, aspect-chain }: if true then aspect else class aspect-chain;
@@ -149,22 +215,22 @@ let
       }
     );
 
-  # Top-level aspects container with fixpoint semantics
   aspectsType =
     cnf:
     lib.types.submodule (
       { config, ... }:
       {
-        freeformType = lib.types.lazyAttrsOf (
-          lib.types.either (lib.types.addCheck (aspectSubmodule cnf) (
-            m: (!builtins.isFunction m) || isSubmoduleFn m
-          )) (providerType cnf)
-        );
+        freeformType = lib.types.lazyAttrsOf (aspectType cnf);
         config._module.args.aspects = config;
       }
     );
 
 in
 {
-  inherit aspectsType aspectSubmodule providerType;
+  inherit
+    aspectsType
+    aspectSubmodule
+    aspectType
+    isModuleFn
+    ;
 }
