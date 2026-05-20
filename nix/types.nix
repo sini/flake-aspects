@@ -2,16 +2,6 @@ lib:
 let
   resolve = import ./resolve.nix lib;
 
-  isModuleFn =
-    fn:
-    builtins.isFunction fn
-    && (
-      let
-        args = builtins.functionArgs fn;
-      in
-      args ? config || args ? options || args ? lib || args ? pkgs
-    );
-
   ignoredType = lib.types.mkOptionType {
     name = "ignored type";
     merge = _loc: _defs: null;
@@ -202,6 +192,5 @@ in
     aspectsType
     aspectSubmodule
     aspectType
-    isModuleFn
     ;
 }

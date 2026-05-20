@@ -3,7 +3,6 @@ let
   types = import ./types.nix lib;
   resolve = import ./resolve.nix lib;
   identity = import ./identity.nix lib;
-  inherit (types) isModuleFn;
   transpose =
     {
       emit ? lib.singleton,
@@ -24,6 +23,5 @@ in
     forward
     resolve
     identity
-    isModuleFn
     ;
 }
