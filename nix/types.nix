@@ -52,7 +52,7 @@ let
     cnf:
     lib.types.mkOptionType {
       name = "aspect";
-      check = v: builtins.isAttrs v || builtins.isFunction v;
+      check = _: true;
       merge =
         loc: defs:
         if builtins.length defs != 1 then
@@ -87,9 +87,12 @@ let
             // {
               __isWrappedFn = true;
             }
-          # Attrset — merge as submodule
+          # Attrset → always merge as submodule (gets identity, structural keys)
+          else if builtins.isAttrs v then
+            (aspectSubmodule cnf).merge loc defs
+          # Primitive (list, string, bool, etc.) → pass through raw
           else
-            (aspectSubmodule cnf).merge loc defs;
+            (lib.last defs).value;
     };
 
   # Recursion-safe binding: either doesn't force subtypes during construction.
@@ -100,7 +103,7 @@ let
     lib.types.submodule (
       { name, config, ... }:
       {
-        freeformType = lib.types.lazyAttrsOf lib.types.deferredModule;
+        freeformType = lib.types.lazyAttrsOf (aspectType cnf);
         config._module.args.aspect = config;
         imports = [ (lib.mkAliasOptionModule [ "_" ] [ "provides" ]) ];
 

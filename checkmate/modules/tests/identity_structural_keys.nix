@@ -14,6 +14,7 @@
       "modules"
       "resolve"
       "key"
+      "imports"
       "_module"
       "_"
     ];

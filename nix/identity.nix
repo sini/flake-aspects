@@ -22,6 +22,7 @@ in
     "key"
     "modules"
     "resolve"
+    "imports"
     "__functor"
     "__functionArgs"
     "__isWrappedFn"
