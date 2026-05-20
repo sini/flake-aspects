@@ -3,31 +3,29 @@ let
   aspectPath = a: (a.meta.aspect-chain or [ ]) ++ [ (a.name or "<anon>") ];
 
   pathKey = path: lib.concatStringsSep "/" path;
+
+  isMeaningfulName =
+    name: name != "<anon>" && name != "<function body>" && !(lib.hasPrefix "[definition " name);
 in
 {
-  inherit aspectPath pathKey;
+  inherit aspectPath pathKey isMeaningfulName;
 
   key = a: pathKey (aspectPath a);
 
-  # Structural keys — derived from aspectSubmodule's declared options + internal attrs.
-  # If aspectSubmodule gains a new option, add it here.
+  # Keys that are structural to aspects, never class content.
   structuralKeysSet = lib.genAttrs [
-    # aspectSubmodule declared options
     "name"
     "description"
     "meta"
     "includes"
     "provides"
-    "__functor"
-    # computed/internal options
+    "key"
     "modules"
     "resolve"
-    "key"
-    # module system internals
+    "__functor"
+    "__functionArgs"
+    "__isWrappedFn"
     "_module"
     "_"
-    # wrapper tags
-    "__isWrappedFn"
-    "__functionArgs"
   ] (_: true);
 }

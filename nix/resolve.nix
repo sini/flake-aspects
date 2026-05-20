@@ -2,9 +2,6 @@ lib:
 let
   identity = import ./identity.nix lib;
 
-  isMeaningfulName =
-    name: name != "<anon>" && name != "<function body>" && !(lib.hasPrefix "[definition " name);
-
   include =
     class: aspect-chain: seen: provider:
     let
@@ -16,21 +13,15 @@ let
     class: aspect-chain: seen: provided:
     let
       name = provided.name or "<anon>";
-      dedupKey =
-        if isMeaningfulName name && !(lib.hasPrefix "<" name && lib.hasSuffix ">" name) then
-          identity.key provided
-        else
-          null;
+      isSynthetic = lib.hasPrefix "<" name && lib.hasSuffix ">" name;
+      dedupKey = if identity.isMeaningfulName name && !isSynthetic then identity.key provided else null;
       alreadySeen = dedupKey != null && seen ? ${dedupKey};
-      config = provided.${class} or { };
-      includes = provided.includes or [ ];
       newSeen = if dedupKey != null then seen // { ${dedupKey} = true; } else seen;
-      resolvedIncludes = lib.map (include class (aspect-chain ++ [ provided ]) newSeen) includes;
     in
     {
       imports = lib.flatten [
-        (lib.optional (!alreadySeen) config)
-        resolvedIncludes
+        (lib.optional (!alreadySeen) (provided.${class} or { }))
+        (lib.map (include class (aspect-chain ++ [ provided ]) newSeen) (provided.includes or [ ]))
       ];
     };
 

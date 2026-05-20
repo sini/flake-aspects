@@ -3,8 +3,9 @@ let
   resolve = import ./resolve.nix lib;
   identity = import ./identity.nix lib;
 
-  ignoredType = lib.types.mkOptionType {
-    name = "ignored type";
+  # Type for internal computed options — merges to null, apply overrides value.
+  internalType = lib.types.mkOptionType {
+    name = "internal";
     merge = _loc: _defs: null;
     check = _: true;
   };
@@ -39,6 +40,13 @@ let
       };
   };
 
+  isSubmoduleFn =
+    v:
+    let
+      args = builtins.functionArgs v;
+    in
+    args ? lib || args ? config || args ? options || args ? aspect;
+
   # Palmer's flat type. One type, dispatch in merge, no recursive type construction.
   aspectType =
     cnf:
@@ -47,43 +55,44 @@ let
       check = v: builtins.isAttrs v || builtins.isFunction v;
       merge =
         loc: defs:
-        let
-          d = builtins.head defs;
-          v = d.value;
-        in
-        if builtins.length defs == 1 then
-          if builtins.isAttrs v && (v.__isWrappedFn or false) then
-            v
-          else if builtins.isFunction v then
-            let
-              args = builtins.functionArgs v;
-            in
-            if args ? lib || args ? config || args ? options || args ? aspect then
-              (aspectSubmodule cnf).merge loc defs
-            else
-              (lib.types.functionTo (aspectSubmodule cnf)).merge (loc ++ [ "<function body>" ]) defs
-              // {
-                __isWrappedFn = true;
-              }
-          else
-            (aspectSubmodule cnf).merge loc defs
-        else
+        if builtins.length defs != 1 then
+          # Multi-def: coerce functions to { includes = [fn]; }, merge as submodule
           (aspectSubmodule cnf).merge loc (
             map (
-              def:
-              if builtins.isFunction def.value then
-                def
+              d:
+              if builtins.isFunction d.value then
+                d
                 // {
                   value = {
-                    includes = [ def.value ];
+                    includes = [ d.value ];
                   };
                 }
               else
-                def
+                d
             ) defs
-          );
+          )
+        else
+          let
+            v = (builtins.head defs).value;
+          in
+          # Wrapped fn — passthrough
+          if builtins.isAttrs v && (v.__isWrappedFn or false) then
+            v
+          # Submodule fn — direct eval (needs _module.args)
+          else if builtins.isFunction v && isSubmoduleFn v then
+            (aspectSubmodule cnf).merge loc defs
+          # Parametric fn — defunctionalize (functionTo types the return value)
+          else if builtins.isFunction v then
+            (lib.types.functionTo (aspectSubmodule cnf)).merge (loc ++ [ "<function body>" ]) defs
+            // {
+              __isWrappedFn = true;
+            }
+          # Attrset — merge as submodule
+          else
+            (aspectSubmodule cnf).merge loc defs;
     };
 
+  # Recursion-safe binding: either doesn't force subtypes during construction.
   aspectOrFn = cnf: lib.types.either (aspectType cnf) (aspectSubmodule cnf);
 
   aspectSubmodule =
@@ -108,8 +117,7 @@ let
             type = lib.types.str;
           };
 
-          # Palmer's `identify` eliminator — intrinsic identity
-          key = mkInternal "aspect identity key" lib.types.str (_: identity.key config);
+          key = mkInternal "identity key" lib.types.str (_: identity.key config);
 
           meta = lib.mkOption {
             description = "Aspect metadata";
@@ -154,11 +162,11 @@ let
               cnf.defaultFunctor or defaultFunctor;
           };
 
-          modules = mkInternal "resolved modules" ignoredType (
+          modules = mkInternal "resolved modules" internalType (
             _: lib.mapAttrs (class: _: config.resolve { inherit class; }) config
           );
 
-          resolve = mkInternal "resolve for class" ignoredType (
+          resolve = mkInternal "resolve for class" internalType (
             _:
             {
               class,
@@ -182,8 +190,6 @@ let
       }
     );
 
-  # Palmer's intensional function constructor (§2.2).
-  # Wraps a function as inspectable, comparable first-order data.
   mkIntensional = name: closure: fn: {
     inherit name fn closure;
     key = "${name}:${builtins.hashString "sha256" (builtins.toJSON closure)}";
