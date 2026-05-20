@@ -14,7 +14,6 @@ let
 
   ignoredType = lib.types.mkOptionType {
     name = "ignored type";
-    description = "ignored values";
     merge = _loc: _defs: null;
     check = _: true;
   };
@@ -32,7 +31,6 @@ let
 
   functorType = lib.types.mkOptionType {
     name = "aspectFunctor";
-    description = "aspect functor function";
     check = lib.isFunction;
     merge =
       _loc: defs:
@@ -50,81 +48,61 @@ let
       };
   };
 
-  # Palmer's flat aspect type. ONE type, ONE merge, no recursive type references.
-  # Accepts functions and attrsets. Functions are wrapped as callable attrsets
-  # (defunctionalized). Attrsets merge through aspectSubmodule. No either chains.
+  # Palmer's flat type. One type, dispatch in merge, no recursive type construction.
   aspectType =
     cnf:
     lib.types.mkOptionType {
       name = "aspect";
-      description = "aspect or function";
       check = v: builtins.isAttrs v || builtins.isFunction v;
       merge =
         loc: defs:
         let
-          # Palmer's defunctionalization with functionTo semantics:
-          # - Tagged (__isWrappedFn) for passthrough recognition
-          # - functionArgs preserved for inspection
-          # - __functor types return value through aspectSubmodule (curried chain support)
-          wrapFn =
-            fn:
-            let
-              ft = (lib.types.functionTo (aspectSubmodule cnf)).merge (loc ++ [ "<function body>" ]) [
-                {
-                  file = "<wrapped>";
-                  value = fn;
-                }
-              ];
-            in
-            ft // { __isWrappedFn = true; };
-
-          isWrapped = d: builtins.isAttrs d.value && (d.value.__isWrappedFn or false);
-
-          # Partition defs
-          fnDefs = builtins.filter (d: builtins.isFunction d.value) defs;
-          wrappedDefs = builtins.filter isWrapped defs;
-          attrDefs = builtins.filter (d: builtins.isAttrs d.value && !(d.value.__isWrappedFn or false)) defs;
+          d = builtins.head defs;
+          v = d.value;
         in
-        if wrappedDefs != [ ] && fnDefs == [ ] && attrDefs == [ ] then
-          # All wrapped fns — pass through the last one
-          (lib.last wrappedDefs).value
-        else if fnDefs == [ ] && wrappedDefs == [ ] then
-          # All attrsets — merge through aspectSubmodule
-          (aspectSubmodule cnf).merge loc defs
-        else if attrDefs == [ ] && wrappedDefs == [ ] && builtins.length fnDefs == 1 then
-          let
-            fn = (builtins.head fnDefs).value;
-            args = builtins.functionArgs fn;
-            isSubmoduleFn = args ? lib || args ? config || args ? options || args ? aspect;
-          in
-          if isSubmoduleFn then
-            # Submodule function (uses _module.args) — let aspectSubmodule evaluate it as a module
-            (aspectSubmodule cnf).merge loc fnDefs
+        # Single def — dispatch by value shape
+        if builtins.length defs == 1 then
+          # Wrapped fn passthrough (round-trip)
+          if builtins.isAttrs v && (v.__isWrappedFn or false) then
+            v
+          # Function: submodule fn → direct eval, parametric → defunctionalize
+          else if builtins.isFunction v then
+            let
+              args = builtins.functionArgs v;
+            in
+            if args ? lib || args ? config || args ? options || args ? aspect then
+              (aspectSubmodule cnf).merge loc defs
+            else
+              (lib.types.functionTo (aspectSubmodule cnf)).merge (loc ++ [ "<function body>" ]) defs
+              // {
+                __isWrappedFn = true;
+              }
+          # Attrset → aspectSubmodule
           else
-            # Pure parametric function — wrap as callable attrset
-            wrapFn fn
+            (aspectSubmodule cnf).merge loc defs
+        # Multi-def — coerce functions to { includes = [fn]; }, merge as submodule
         else
-          # Multiple functions, or mixed fns + attrsets —
-          # coerce functions to { includes = [fn]; }, merge through aspectSubmodule
           (aspectSubmodule cnf).merge loc (
             map (
-              d:
-              if builtins.isFunction d.value then
-                d
+              def:
+              if builtins.isFunction def.value then
+                def
                 // {
                   value = {
-                    includes = [ d.value ];
+                    includes = [ def.value ];
                   };
                 }
               else
-                d
+                def
             ) defs
           );
     };
 
-  # Non-recursive aspect submodule. Uses aspectType only via `either`
-  # in provides (safe: either doesn't force merge during construction)
-  # and providerType for includes (safe: mutual lazy recursion in let block).
+  # either(aspectType, aspectSubmodule) — used for includes and provides.
+  # `either` doesn't force subtypes during construction, breaking the
+  # aspectType → aspectSubmodule → includes/provides → aspectType cycle.
+  aspectOrFn = cnf: lib.types.either (aspectType cnf) (aspectSubmodule cnf);
+
   aspectSubmodule =
     cnf:
     lib.types.submodule (
@@ -155,17 +133,13 @@ let
               options.aspect-chain = lib.mkOption {
                 type = lib.types.listOf lib.types.str;
                 default = cnf.aspectChain or [ ];
-                description = "Chain of ancestor aspect names from root to parent";
               };
             };
           };
 
-          # either: try aspectType first (wraps fns as callable attrsets),
-          # fall back to aspectSubmodule (coerces fns to includes).
-          # This is safe because either doesn't force subtypes during construction.
           includes = lib.mkOption {
             description = "Aspects to include";
-            type = lib.types.listOf (lib.types.either (aspectType cnf) (aspectSubmodule cnf));
+            type = lib.types.listOf (aspectOrFn cnf);
             default = [ ];
           };
 
@@ -176,9 +150,7 @@ let
               { config, ... }:
               {
                 freeformType = lib.types.lazyAttrsOf (
-                  lib.types.either (aspectType (cnf // { aspectChain = (cnf.aspectChain or [ ]) ++ [ name ]; })) (
-                    aspectSubmodule (cnf // { aspectChain = (cnf.aspectChain or [ ]) ++ [ name ]; })
-                  )
+                  aspectOrFn (cnf // { aspectChain = (cnf.aspectChain or [ ]) ++ [ name ]; })
                 );
                 config._module.args.aspects = config;
               }
@@ -188,7 +160,6 @@ let
           __functor = lib.mkOption {
             internal = true;
             visible = false;
-            description = "Functor to default provider";
             type = functorType;
             default =
               let
@@ -197,11 +168,11 @@ let
               cnf.defaultFunctor or defaultFunctor;
           };
 
-          modules = mkInternal "resolved modules from this aspect" ignoredType (
+          modules = mkInternal "resolved modules" ignoredType (
             _: lib.mapAttrs (class: _: config.resolve { inherit class; }) config
           );
 
-          resolve = mkInternal "function to resolve a module from this aspect" ignoredType (
+          resolve = mkInternal "resolve for class" ignoredType (
             _:
             {
               class,
