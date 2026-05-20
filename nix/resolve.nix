@@ -42,17 +42,31 @@ let
       newSeen = if dedupKey != null then seen // { ${dedupKey} = true; } else seen;
       childChain = aspect-chain ++ [ provided ];
       # Fold over includes, threading seen across siblings for cross-branch dedup.
-      collectIncludes = builtins.foldl' (
-        acc: provider:
-        let
-          provided' = if lib.isFunction provider then provider { inherit class; aspect-chain = childChain; } else provider;
-          result = collect class childChain acc.seen provided';
-        in
-        {
-          seen = acc.seen // result.seen;
-          modules = acc.modules ++ result.modules;
-        }
-      ) { seen = newSeen; modules = []; } (provided.includes or []);
+      collectIncludes =
+        builtins.foldl'
+          (
+            acc: provider:
+            let
+              provided' =
+                if lib.isFunction provider then
+                  provider {
+                    inherit class;
+                    aspect-chain = childChain;
+                  }
+                else
+                  provider;
+              result = collect class childChain acc.seen provided';
+            in
+            {
+              seen = acc.seen // result.seen;
+              modules = acc.modules ++ result.modules;
+            }
+          )
+          {
+            seen = newSeen;
+            modules = [ ];
+          }
+          (provided.includes or [ ]);
     in
     {
       seen = collectIncludes.seen;

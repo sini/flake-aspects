@@ -56,20 +56,6 @@
   # The module system merges their definitions (they're the same option path).
   flake.tests."test same-path provides merge not collide" =
     let
-      flake = mkFlake {
-        flake.aspects =
-          { aspects, ... }:
-          {
-            aspectOne = {
-              includes = [ aspects.aspectTwo.provides.shared ];
-              classOne.bar = [ "root" ];
-            };
-
-            # Two modules both defining aspectTwo.provides.shared —
-            # the module system merges them into one aspect.
-            aspectTwo.provides.shared.classOne.bar = [ "first" ];
-          };
-      };
       flake2 = mkFlake {
         imports = [
           {

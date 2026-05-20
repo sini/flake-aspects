@@ -12,6 +12,7 @@ let
   forward = import ./forward.nix lib;
   new = import ./new.nix lib;
   new-scope = import ./new-scope.nix new;
+  search = import ./search.nix;
 in
 {
   inherit
@@ -23,6 +24,7 @@ in
     forward
     resolve
     identity
+    search
     ;
   inherit (types) mkIntensional intensionalEq;
 }
