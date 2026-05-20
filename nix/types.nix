@@ -56,21 +56,26 @@ let
       merge =
         loc: defs:
         if builtins.length defs != 1 then
-          # Multi-def: coerce functions to { includes = [fn]; }, merge as submodule
-          (aspectSubmodule cnf).merge loc (
-            map (
-              d:
-              if builtins.isFunction d.value then
-                d
-                // {
-                  value = {
-                    includes = [ d.value ];
-                  };
-                }
-              else
-                d
-            ) defs
-          )
+          # Multi-def: check if all primitives (lists, strings, etc.)
+          if builtins.all (d: !(builtins.isAttrs d.value) && !(builtins.isFunction d.value)) defs then
+            # All primitives — mkMerge so the option type decides how to combine
+            lib.mkMerge (map (d: d.value) defs)
+          else
+            # Has attrsets/functions — coerce functions, merge as submodule
+            (aspectSubmodule cnf).merge loc (
+              map (
+                d:
+                if builtins.isFunction d.value then
+                  d
+                  // {
+                    value = {
+                      includes = [ d.value ];
+                    };
+                  }
+                else
+                  d
+              ) defs
+            )
         else
           let
             v = (builtins.head defs).value;

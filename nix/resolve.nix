@@ -4,25 +4,33 @@ let
 
   structuralKeys = builtins.attrNames identity.structuralKeysSet;
 
-  # Recursively strip aspect structural keys from class content.
-  # Returns a list: [content] ++ user-imports (from the aspectSubmodule).
-  extractClass =
-    raw:
-    if builtins.isAttrs raw && builtins.any (k: raw ? ${k}) structuralKeys then
-      let
-        stripped = lib.mapAttrs (_: v: extractClassSingle v) (builtins.removeAttrs raw structuralKeys);
-        userImports = raw.imports or [ ];
-      in
-      [ stripped ] ++ userImports
-    else
-      [ raw ];
+  isAspectValue = v: builtins.isAttrs v && v ? name && v ? includes;
 
+  # Recursively strip aspect structure from values.
   extractClassSingle =
     v:
-    if builtins.isAttrs v && builtins.any (k: v ? ${k}) structuralKeys then
+    if isAspectValue v then
       lib.mapAttrs (_: extractClassSingle) (builtins.removeAttrs v structuralKeys)
+    else if builtins.isAttrs v && (v.__isWrappedFn or false) then
+      # Wrapped module function — create a new function that calls the
+      # wrapper and strips aspect keys from the result, preserving imports.
+      args:
+      let
+        result = v args;
+      in
+      if isAspectValue result then builtins.removeAttrs result structuralKeys else result
     else
       v;
+
+  # Extract class content from a freeform value.
+  # Aspect values → strip structural keys, return as module list.
+  # Non-aspect → return as-is in a list.
+  extractClass =
+    raw:
+    if isAspectValue raw then
+      [ (lib.mapAttrs (_: extractClassSingle) (builtins.removeAttrs raw structuralKeys)) ]
+    else
+      [ raw ];
 
   include =
     class: aspect-chain: seen: provider:
