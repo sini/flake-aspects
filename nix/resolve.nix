@@ -29,15 +29,9 @@ let
     else
       [ raw ];
 
-  # Collect imports flat — no { imports = [...] } wrapping per level.
-  # Returns a flat list of modules, not nested { imports } attrsets.
-  include =
-    class: aspect-chain: seen: provider:
-    let
-      provided = if lib.isFunction provider then provider { inherit aspect-chain class; } else provider;
-    in
-    collect class aspect-chain seen provided;
-
+  # Palmer §3: fold-based collect threads seen set across sibling includes,
+  # deduplicating diamond dependencies where the same aspect is reached
+  # via parallel include paths.
   collect =
     class: aspect-chain: seen: provided:
     let
@@ -46,13 +40,34 @@ let
       dedupKey = if identity.isMeaningfulName name && !isSynthetic then identity.key provided else null;
       alreadySeen = dedupKey != null && seen ? ${dedupKey};
       newSeen = if dedupKey != null then seen // { ${dedupKey} = true; } else seen;
+      childChain = aspect-chain ++ [ provided ];
+      # Fold over includes, threading seen across siblings for cross-branch dedup.
+      collectIncludes = builtins.foldl' (
+        acc: provider:
+        let
+          provided' = if lib.isFunction provider then provider { inherit class; aspect-chain = childChain; } else provider;
+          result = collect class childChain acc.seen provided';
+        in
+        {
+          seen = acc.seen // result.seen;
+          modules = acc.modules ++ result.modules;
+        }
+      ) { seen = newSeen; modules = []; } (provided.includes or []);
     in
-    lib.flatten [
-      (lib.optionals (!alreadySeen) (extractClass (provided.${class} or { })))
-      (lib.map (include class (aspect-chain ++ [ provided ]) newSeen) (provided.includes or [ ]))
-    ];
+    {
+      seen = collectIncludes.seen;
+      modules = lib.flatten [
+        (lib.optionals (!alreadySeen) (extractClass (provided.${class} or { })))
+        collectIncludes.modules
+      ];
+    };
 
-  # Single wrap at the top level.
+  # Single wrap at the top level (Lorenzen: flat collect, single wrap).
+  # collect eagerly flattens the entire include tree. Lorenzen §2.4's
+  # eval-one (partial forcing) doesn't apply — the NixOS module system
+  # requires fully-stripped values at all depths. Nix's native thunk
+  # laziness provides deferred evaluation at the attribute access level:
+  # resolve is only called when a class's modules are actually needed.
   resolve =
     class: aspect-chain: aspect:
     let
@@ -66,7 +81,7 @@ let
           aspect;
     in
     {
-      imports = collect class aspect-chain { } provided;
+      imports = (collect class aspect-chain { } provided).modules;
     };
 in
 resolve

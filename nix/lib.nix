@@ -24,5 +24,5 @@ in
     resolve
     identity
     ;
-  inherit (types) mkIntensional;
+  inherit (types) mkIntensional intensionalEq;
 }

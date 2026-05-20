@@ -198,11 +198,26 @@ let
       }
     );
 
+  # Palmer §2.2: intensional function constructor. Wraps any function as
+  # inspectable, comparable first-order data.
+  #
+  # `name` is the program point (Palmer's `identify`) — a string that serves
+  # as the cheap identity key. Callers who need finer discrimination encode
+  # it in the name: mkIntensional "myPolicy:${host}" ctx fn
+  #
+  # `closure` is inspect-only data (Palmer's `inspect`) — never serialized
+  # or hashed automatically. Preserved for programmatic inspection but does
+  # not participate in identity unless the caller puts it in `name`.
   mkIntensional = name: closure: fn: {
     inherit name fn closure;
-    key = "${name}:${builtins.hashString "sha256" (builtins.toJSON closure)}";
+    key = name;
     __functor = self: self.fn;
   };
+
+  # Palmer §2.3 (Figure 5): conservative equality on intensional functions.
+  # Compares by key (program point). For deeper equality that also considers
+  # closure contents, callers should compare closure fields directly.
+  intensionalEq = a: b: a.key == b.key;
 
 in
 {
@@ -211,5 +226,6 @@ in
     aspectSubmodule
     aspectType
     mkIntensional
+    intensionalEq
     ;
 }
