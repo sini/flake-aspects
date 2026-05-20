@@ -6,14 +6,14 @@ let
 
   isAspectValue = v: builtins.isAttrs v && v ? name && v ? includes;
 
-  # Recursively strip aspect structure from values.
+  # Strip aspect structure recursively from nested values.
+  # Lorenzen's eval-one can't apply here because the NixOS module system
+  # needs clean values (no structural keys) at all depths.
   extractClassSingle =
     v:
     if isAspectValue v then
       lib.mapAttrs (_: extractClassSingle) (builtins.removeAttrs v structuralKeys)
     else if builtins.isAttrs v && (v.__isWrappedFn or false) then
-      # Wrapped module function — create a new function that calls the
-      # wrapper and strips aspect keys from the result, preserving imports.
       args:
       let
         result = v args;
@@ -22,9 +22,6 @@ let
     else
       v;
 
-  # Extract class content from a freeform value.
-  # Aspect values → strip structural keys, return as module list.
-  # Non-aspect → return as-is in a list.
   extractClass =
     raw:
     if isAspectValue raw then
@@ -32,14 +29,16 @@ let
     else
       [ raw ];
 
+  # Collect imports flat — no { imports = [...] } wrapping per level.
+  # Returns a flat list of modules, not nested { imports } attrsets.
   include =
     class: aspect-chain: seen: provider:
     let
       provided = if lib.isFunction provider then provider { inherit aspect-chain class; } else provider;
     in
-    inner class aspect-chain seen provided;
+    collect class aspect-chain seen provided;
 
-  inner =
+  collect =
     class: aspect-chain: seen: provided:
     let
       name = provided.name or "<anon>";
@@ -48,13 +47,12 @@ let
       alreadySeen = dedupKey != null && seen ? ${dedupKey};
       newSeen = if dedupKey != null then seen // { ${dedupKey} = true; } else seen;
     in
-    {
-      imports = lib.flatten [
-        (lib.optionals (!alreadySeen) (extractClass (provided.${class} or { })))
-        (lib.map (include class (aspect-chain ++ [ provided ]) newSeen) (provided.includes or [ ]))
-      ];
-    };
+    lib.flatten [
+      (lib.optionals (!alreadySeen) (extractClass (provided.${class} or { })))
+      (lib.map (include class (aspect-chain ++ [ provided ]) newSeen) (provided.includes or [ ]))
+    ];
 
+  # Single wrap at the top level.
   resolve =
     class: aspect-chain: aspect:
     let
@@ -67,6 +65,8 @@ let
         else
           aspect;
     in
-    inner class aspect-chain { } provided;
+    {
+      imports = collect class aspect-chain { } provided;
+    };
 in
 resolve
