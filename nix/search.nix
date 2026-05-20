@@ -111,13 +111,16 @@ let
           anyFired = fired.anyFired;
         };
       iterate =
-        state:
-        let
-          r = step state;
-        in
-        if r.anyFired then iterate r.state else r.state;
+        n: state:
+        if n <= 0 then
+          throw "search: converge exceeded 1000 iterations — likely a non-terminating continuation"
+        else
+          let
+            r = step state;
+          in
+          if r.anyFired then iterate (n - 1) r.state else r.state;
     in
-    iterate state;
+    iterate 1000 state;
 
 in
 {

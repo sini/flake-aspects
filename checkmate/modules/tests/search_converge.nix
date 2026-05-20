@@ -18,7 +18,7 @@
       let
         s0 = search.insert "trigger" "go" search.empty;
         # A watches "trigger", inserts into "data"
-        s1 = search.on "trigger" (v: s: search.insert "data" "from-A" s) s0;
+        s1 = search.on "trigger" (_v: s: search.insert "data" "from-A" s) s0;
         # B watches "data", emits what it sees
         s2 = search.on "data" (v: s: search.emit [ "B-saw:${v}" ] s) s1;
         final = search.converge s2;
@@ -52,7 +52,7 @@
     expr =
       let
         s0 = search.insert "other" "v" search.empty;
-        s1 = search.on "missing" (v: s: search.emit [ "should-not-fire" ] s) s0;
+        s1 = search.on "missing" (_v: s: search.emit [ "should-not-fire" ] s) s0;
         final = search.converge s1;
       in
       final.results;
@@ -67,7 +67,7 @@
         s1 = search.insert "phase2" "data" s0;
         # First continuation watches phase1, registers a new continuation on phase2
         s2 = search.on "phase1" (
-          v: s: search.on "phase2" (v2: s2: search.emit [ "dynamic:${v2}" ] s2) s
+          _v: s: search.on "phase2" (v2: s2: search.emit [ "dynamic:${v2}" ] s2) s
         ) s1;
         final = search.converge s2;
       in
@@ -117,5 +117,31 @@
       "processed:start"
       "processed:done"
     ];
+  };
+
+  # on registered before insert — the primary den use case
+  # (register policy watchers, then populate context)
+  flake.tests."test search converge on before insert" = {
+    expr =
+      let
+        s0 = search.on "k" (v: s: search.emit [ "saw:${v}" ] s) search.empty;
+        s1 = search.insert "k" "late-arrival" s0;
+        final = search.converge s1;
+      in final.results;
+    expected = [ "saw:late-arrival" ];
+  };
+
+  # Non-intensional duplicate continuations are NOT deduped — both fire
+  flake.tests."test search converge non-intensional duplicates fire independently" = {
+    expr =
+      let
+        fn = v: s: search.emit [ "fired:${v}" ] s;
+        s0 = search.insert "k" "v" search.empty;
+        s1 = search.on "k" fn s0;
+        s2 = search.on "k" fn s1;
+        final = search.converge s2;
+      in final.results;
+    # Both fire — plain functions have no identity for dedup
+    expected = [ "fired:v" "fired:v" ];
   };
 }
