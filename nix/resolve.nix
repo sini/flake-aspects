@@ -1,5 +1,6 @@
 lib:
 let
+  search = import ./search.nix;
   identity = import ./identity.nix lib;
 
   structuralKeys = builtins.attrNames identity.structuralKeysSet;
@@ -29,52 +30,39 @@ let
     else
       [ raw ];
 
+  dedupKeyOf =
+    provided:
+    let
+      name = provided.name or "<anon>";
+      isSynthetic = lib.hasPrefix "<" name && lib.hasSuffix ">" name;
+    in
+    if identity.isMeaningfulName name && !isSynthetic then identity.key provided else null;
+
+  coerce = provider: ctx: if lib.isFunction provider then provider ctx else provider;
+
   # Palmer §3: fold-based collect threads seen set across sibling includes,
   # deduplicating diamond dependencies where the same aspect is reached
   # via parallel include paths.
   collect =
-    class: aspect-chain: seen: provided:
+    class: aspect-chain: state: provided:
     let
-      name = provided.name or "<anon>";
-      isSynthetic = lib.hasPrefix "<" name && lib.hasSuffix ">" name;
-      dedupKey = if identity.isMeaningfulName name && !isSynthetic then identity.key provided else null;
-      alreadySeen = dedupKey != null && seen ? ${dedupKey};
-      newSeen = if dedupKey != null then seen // { ${dedupKey} = true; } else seen;
+      key = dedupKeyOf provided;
+      alreadySeen = key != null && search.has key state;
+      state' = if key != null then search.insert key provided state else state;
+      state'' =
+        if !alreadySeen then search.emit (extractClass (provided.${class} or { })) state' else state';
       childChain = aspect-chain ++ [ provided ];
-      # Fold over includes, threading seen across siblings for cross-branch dedup.
-      collectIncludes =
-        builtins.foldl'
-          (
-            acc: provider:
-            let
-              provided' =
-                if lib.isFunction provider then
-                  provider {
-                    inherit class;
-                    aspect-chain = childChain;
-                  }
-                else
-                  provider;
-              result = collect class childChain acc.seen provided';
-            in
-            {
-              seen = acc.seen // result.seen;
-              modules = acc.modules ++ result.modules;
-            }
-          )
-          {
-            seen = newSeen;
-            modules = [ ];
-          }
-          (provided.includes or [ ]);
     in
-    {
-      seen = collectIncludes.seen;
-      modules = lib.flatten [
-        (lib.optionals (!alreadySeen) (extractClass (provided.${class} or { })))
-        collectIncludes.modules
-      ];
-    };
+    search.foldl (
+      acc: provider:
+      let
+        provided' = coerce provider {
+          inherit class;
+          aspect-chain = childChain;
+        };
+      in
+      collect class childChain acc provided'
+    ) state'' (provided.includes or [ ]);
 
   # Single wrap at the top level (Lorenzen: flat collect, single wrap).
   # collect eagerly flattens the entire include tree. Lorenzen §2.4's
@@ -85,17 +73,14 @@ let
   resolve =
     class: aspect-chain: aspect:
     let
-      provided =
-        if lib.isFunction aspect then
-          aspect {
-            inherit class;
-            aspect-chain = aspect-chain;
-          }
-        else
-          aspect;
+      provided = coerce aspect {
+        inherit class;
+        aspect-chain = aspect-chain;
+      };
+      final = collect class aspect-chain search.empty provided;
     in
     {
-      imports = (collect class aspect-chain { } provided).modules;
+      imports = final.results;
     };
 in
 resolve
