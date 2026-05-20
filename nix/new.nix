@@ -1,12 +1,13 @@
 # Low-level aspect scope factory
 # Creates aspect integration via callback pattern for maximum flexibility
-lib: cb: cfg:
+{ lib, gen }:
+cb: cfg:
 let
   # Import aspects transposer: validates and transposes aspect config
   aspects = import ./aspects.nix lib cfg;
 
   # Import type system for aspect validation
-  types = import ./types.nix lib;
+  types = import ./types.nix { inherit lib gen; };
 
   # Create aspects input option
   option = lib.mkOption {

@@ -38,7 +38,7 @@
 #
 # See checkmate/modules/tests/forward.nix for working example.
 #
-lib:
+{ lib, gen }:
 {
   each,
   fromClass,
@@ -47,7 +47,7 @@ lib:
   fromAspect,
 }:
 let
-  resolve = import ./resolve.nix lib;
+  resolve = import ./resolve.nix { inherit lib gen; };
   include =
     item:
     let

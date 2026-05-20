@@ -127,7 +127,8 @@
         s0 = search.on "k" (v: s: search.emit [ "saw:${v}" ] s) search.empty;
         s1 = search.insert "k" "late-arrival" s0;
         final = search.converge s1;
-      in final.results;
+      in
+      final.results;
     expected = [ "saw:late-arrival" ];
   };
 
@@ -140,8 +141,12 @@
         s1 = search.on "k" fn s0;
         s2 = search.on "k" fn s1;
         final = search.converge s2;
-      in final.results;
+      in
+      final.results;
     # Both fire — plain functions have no identity for dedup
-    expected = [ "fired:v" "fired:v" ];
+    expected = [
+      "fired:v"
+      "fired:v"
+    ];
   };
 }

@@ -57,7 +57,7 @@ let
     }).config;
 in
 {
-  _module.args = (import targetLib lib) // {
+  _module.args = (import targetLib { inherit lib; }) // {
     inherit
       transpose
       targetMod

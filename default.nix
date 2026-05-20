@@ -2,4 +2,4 @@
   pkgs ? import <nixpkgs> { },
   ...
 }:
-import ./nix/lib.nix pkgs.lib
+import ./nix/lib.nix { lib = pkgs.lib; }

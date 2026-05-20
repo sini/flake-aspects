@@ -1,6 +1,6 @@
-lib:
+{ lib, gen }:
 let
-  search = import ./search.nix;
+  inherit (gen) search;
   identity = import ./identity.nix lib;
 
   structuralKeys = builtins.attrNames identity.structuralKeysSet;

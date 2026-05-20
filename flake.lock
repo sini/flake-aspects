@@ -1,0 +1,26 @@
+{
+  "nodes": {
+    "gen": {
+      "locked": {
+        "lastModified": 1779301087,
+        "narHash": "sha256-c3n7/PMbqWC/fKIrKmSlcybpwrJ+HULWN/PuQhwFNiI=",
+        "owner": "sini",
+        "repo": "gen",
+        "rev": "34aa7e81dea9cf0dca033e5ef30b0c8202ebd255",
+        "type": "github"
+      },
+      "original": {
+        "owner": "sini",
+        "repo": "gen",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "gen": "gen"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

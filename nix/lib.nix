@@ -1,7 +1,19 @@
-lib:
+{
+  inputs ? { },
+  lib,
+}:
 let
-  types = import ./types.nix lib;
-  resolve = import ./resolve.nix lib;
+  # No-flakes import: resolve gen from flake.lock
+  lock = builtins.fromJSON (builtins.readFile ../flake.lock);
+  lockedGen = lock.nodes.gen.locked;
+  genSrc = builtins.fetchTarball {
+    url = "https://github.com/${lockedGen.owner}/${lockedGen.repo}/archive/${lockedGen.rev}.zip";
+    sha256 = lockedGen.narHash;
+  };
+  gen = inputs.gen or (import genSrc { });
+
+  types = import ./types.nix { inherit lib gen; };
+  resolve = import ./resolve.nix { inherit lib gen; };
   identity = import ./identity.nix lib;
   transpose =
     {
@@ -9,10 +21,9 @@ let
     }:
     import ./default.nix { inherit lib emit; };
   aspects = import ./aspects.nix lib;
-  forward = import ./forward.nix lib;
-  new = import ./new.nix lib;
+  forward = import ./forward.nix { inherit lib gen; };
+  new = import ./new.nix { inherit lib gen; };
   new-scope = import ./new-scope.nix new;
-  search = import ./search.nix;
 in
 {
   inherit
@@ -24,7 +35,6 @@ in
     forward
     resolve
     identity
-    search
     ;
-  inherit (types) mkIntensional intensionalEq;
+  inherit (gen) search mkIntensional intensionalEq;
 }
