@@ -1,7 +1,8 @@
-{ lib, gen }:
+{ lib, gen, cnf ? {} }:
 let
   inherit (gen) search;
   identity = import ./identity.nix lib;
+  registeredClasses = cnf.classes or {};
 
   structuralKeys = builtins.attrNames identity.structuralKeysSet;
 
@@ -50,15 +51,14 @@ let
       alreadySeen = key != null && search.has key state;
       state' = if key != null then search.insert key provided state else state;
       rawClass = provided.${class} or { };
-      # deferredModule.merge produces { imports = [...]; } with only imports.
-      # Aspect values always have structural keys (name, includes, etc.), so
-      # a value with only imports is unambiguously from deferredModule dispatch.
-      isDeferredClass =
-        builtins.isAttrs rawClass
-        && rawClass ? imports
-        && builtins.attrNames rawClass == [ "imports" ];
+      # Palmer §2.2: identify, not inspect. Registered classes are explicit
+      # deferredModule options — clean by construction, emit imports directly.
+      # Unregistered classes went through aspectType — use extractClass.
       classContent =
-        if isDeferredClass then rawClass.imports else extractClass rawClass;
+        if registeredClasses ? ${class} then
+          rawClass.imports or [ ]
+        else
+          extractClass rawClass;
       state'' =
         if !alreadySeen then search.emit classContent state' else state';
       childChain = aspect-chain ++ [ provided ];

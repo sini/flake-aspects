@@ -103,34 +103,28 @@ let
   # Recursion-safe binding: either doesn't force subtypes during construction.
   aspectOrFn = cnf: lib.types.either (aspectType cnf) (aspectSubmodule cnf);
 
-  # Dispatching freeform element type: registered class keys go through
-  # deferredModule (clean content, no structural keys injected), everything
-  # else goes through aspectType (full aspect treatment with identity).
-  aspectFreeformElemType =
-    cnf:
-    let
-      classKeys = cnf.classes or { };
-    in
-    lib.types.mkOptionType {
-      name = "aspectFreeformElem";
-      check = _: true;
-      merge =
-        loc: defs:
-        let
-          key = lib.last loc;
-        in
-        if classKeys ? ${key} then
-          lib.types.deferredModule.merge loc defs
-        else
-          (aspectType cnf).merge loc defs;
-    };
-
   aspectSubmodule =
     cnf:
+    let
+      # Explicit deferredModule option per registered class.
+      # The module system routes class keys here, never touching freeformType.
+      # Class content is clean by construction — no structural keys injected.
+      classOptions = lib.genAttrs (builtins.attrNames (cnf.classes or { })) (
+        _:
+        lib.mkOption {
+          description = "Class content (deferred module)";
+          default = { };
+          type = lib.types.deferredModule;
+        }
+      );
+
+      # resolve closed over the same cnf — positive registry check, not shape inspection
+      resolveWithCnf = import ./resolve.nix { inherit lib gen cnf; };
+    in
     lib.types.submodule (
       { name, config, ... }:
       {
-        freeformType = lib.types.lazyAttrsOf (aspectFreeformElemType cnf);
+        freeformType = lib.types.lazyAttrsOf (aspectType cnf);
         config._module.args.aspect = config;
         imports = [ (lib.mkAliasOptionModule [ "_" ] [ "provides" ]) ];
 
@@ -202,11 +196,11 @@ let
               class,
               aspect-chain ? [ ],
             }:
-            resolve class aspect-chain (config {
+            resolveWithCnf class aspect-chain (config {
               inherit class aspect-chain;
             })
           );
-        };
+        } // classOptions;
       }
     );
 
